@@ -20,8 +20,9 @@ from microsoft_agents.hosting.core import (
     TurnState,
 )
 
-from .services.message_route import handle_build_genie_message
-from .services.retrieval_client import get_retrieval_options, retrieve_sharepoint
+from .services.card import create_country_selection_card
+from .services.message_route import handle_two_level_conversation_turn
+from .services.retrieval_client import get_retrieval_options
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -42,12 +43,21 @@ async def welcome(context: TurnContext, _state: TurnState) -> None:
         if member.id != context.activity.recipient.id:
             await context.send_activity(
                 MessageFactory.text(
-                    "Hello! I am Build Genie. Ask me about Build 2025 sessions in the configured SharePoint site. I only search content you can access."
+                    "Hello! Welcome to the **Two-Level Retrieval with Microsoft 365 Copilot Retrieval API** demo. "
+                    "Before searching SharePoint (`MyFiles` and `OrgFiles`), please select a **Country** (`Europe`, `US`, or `China`)."
+                )
+            )
+            await context.send_activity(
+                MessageFactory.attachment(
+                    Attachment(
+                        content_type="application/vnd.microsoft.card.adaptive",
+                        content=create_country_selection_card(),
+                    )
                 )
             )
 
 
-@AGENT_APP.message(re.compile(r".*"), auth_handlers=["GRAPH"])
+@AGENT_APP.message(re.compile(r".*", re.DOTALL), auth_handlers=["GRAPH"])
 async def message(context: TurnContext, _state: TurnState) -> None:
     await context.send_activity(Activity(type=ActivityTypes.typing))
 
@@ -55,11 +65,23 @@ async def message(context: TurnContext, _state: TurnState) -> None:
         token_response = await AGENT_APP.auth.get_token(context, "GRAPH")
         return token_response.token if token_response else None
 
-    result = await retrieve_sharepoint(context.activity.text or "", get_access_token)
-    await handle_build_genie_message(
-        result,
-        lambda text: context.send_activity(MessageFactory.text(text)),
-        lambda card: context.send_activity(
+    conversation_id = (
+        context.activity.conversation.id
+        if context.activity and context.activity.conversation
+        else "default"
+    )
+    activity_value = (
+        context.activity.value
+        if isinstance(getattr(context.activity, "value", None), dict)
+        else None
+    )
+    await handle_two_level_conversation_turn(
+        conversation_id=conversation_id,
+        text=context.activity.text,
+        value=activity_value,
+        get_access_token=get_access_token,
+        send_text=lambda text: context.send_activity(MessageFactory.text(text)),
+        send_card=lambda card: context.send_activity(
             MessageFactory.attachment(
                 Attachment(
                     content_type="application/vnd.microsoft.card.adaptive",
